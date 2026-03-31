@@ -3,6 +3,11 @@
 <br/>
 Control your Zengge bluetooth mesh lights from Home Assistant!
 
+```diff
+- I have abandoned this project a while ago due to moving away from Zengge lights.
+- Please feel free to fork/copy my work and improve upon it.
+```
+
 ## Install with HACS (recommended)
 
 Do you have [HACS](https://hacs.xyz/) installed?
