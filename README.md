@@ -51,6 +51,8 @@ Logs can be found under Settings - System - Logs - Home Assistant Core<br/>
 Be sure to click **Load Full Logs** in order to retrieve all logs.<br/>
 
 ## Credits
+This is a maintained fork of the original [home-assistant-zengge](https://github.com/SleepyNinja0o/home-assistant-zengge) integration by **@SleepyNinja0o** .<br/>Huge thanks for his original work!<br/><br/>
+
 The majority of this work was based on the [home-assistant-awox](https://github.com/fsaris/home-assistant-awox) integration created by **@fsaris** .<br/>
 Huge shoutout to him for all his hard work!<br/><br/>
 
