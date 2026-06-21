@@ -1,12 +1,7 @@
 # Zengge Mesh Component for Home Assistant
-![alt text](https://github.com/SleepyNinja0o/home-assistant-zengge/blob/main/images/icon.png)<br/>
+![alt text](https://github.com/mikaa5457/home-assistant-zengge/blob/main/images/icon.png)<br/>
 <br/>
 Control your Zengge bluetooth mesh lights from Home Assistant!
-
-```diff
-- I have abandoned this project a while ago due to moving away from Zengge lights.
-- Please feel free to fork/copy my work and improve upon it.
-```
 
 ## Install with HACS (recommended)
 
@@ -14,7 +9,7 @@ Do you have [HACS](https://hacs.xyz/) installed?
 1. Add **Zengge Mesh** as custom repository.
    1. Go to: `HACS` -> `Integrations` -> Click menu in right top -> Custom repositories
    1. A modal opens
-   1. Fill https://github.com/SleepyNinja0o/home-assistant-zengge in the input in the footer of the modal
+   1. Fill https://github.com/mikaa5457/home-assistant-zengge in the input in the footer of the modal
    1. Select `integration` in category select box
    1. Click **Add**
 1. Search integrations for **Zengge Mesh**
@@ -38,7 +33,7 @@ Do you have [HACS](https://hacs.xyz/) installed?
 1. Enjoy :)
 
 ## Troubleshooting
-**As of right now, only the first place is retrieved from the Hao Deng servers, currently working on this**<br/><br/>
+
 **Make sure that at least *1 device/light* is in *bluetooth range* of your Home Assistant server.**
 
 If you run into issues during setup or controlling the lights please increase logging and provide them when creating an issue:
@@ -57,6 +52,6 @@ Be sure to click **Load Full Logs** in order to retrieve all logs.<br/>
 
 ## Credits
 The majority of this work was based on the [home-assistant-awox](https://github.com/fsaris/home-assistant-awox) integration created by **@fsaris** .<br/>
-Huge shotout to him for all his hard work!<br/><br/>
+Huge shoutout to him for all his hard work!<br/><br/>
 
 Also, many kudos to **@donparlor** and **@cocoto** for their continued support on this project!<br/>It is appreciated very much!
