@@ -1,7 +1,5 @@
 #!!!The majority of this code was reused from the home-assistant-awox project developed by fsaris. Huge shoutout to him for all his hard work on this!!!
 
-from __future__ import unicode_literals
-
 from bleak import BleakClient
 from homeassistant.components import bluetooth
 
@@ -11,7 +9,6 @@ from os import urandom
 import asyncio
 import logging
 import struct
-import threading
 import math
 
 # Commands :
@@ -178,9 +175,6 @@ class ZenggeMeshLight:
         self.session_key = None
         self.status_callback = None
 
-        #self.command_char = None - No longer needed (Awox code)
-        #self.status_char = None - No longer needed (Awox code)
-
         self._reconnecting = False
         self._notify_enabled = False
         self.reconnect_counter = 0
@@ -190,15 +184,14 @@ class ZenggeMeshLight:
         self.mesh_password = mesh_password
 
         # Light status
-        #self.white_brightness = 1
-        #self.white_temperature = 1
-        #self.color_brightness = 1
-        #self.red = 0
-        #self.green = 0
-        #self.blue = 0
-        #self.color_mode = False
-        #self.state = False
-        #self.status_callback = None
+        self.white_brightness = 0x64
+        self.white_temperature = 0x32
+        self.color_brightness = 0x64
+        self.red = 0
+        self.green = 0
+        self.blue = 0
+        self.color_mode = 'white'
+        self.state = False
 
     async def enable_notify(self): #Huge thanks to '@cocoto' for helping me figure out this issue with Zengge!
         #await self.send_packet(0x00,bytes([]),self.mesh_id,uuid=STATUS_CHAR_UUID)
@@ -231,7 +224,7 @@ class ZenggeMeshLight:
                 logger.info(f'[{self.mesh_name}][{self.mac}] Device authentication error: known mesh credentials are not excepted by the device. Did you re-pair them to your Hao Deng app with a different account?')
             else:
                 logger.info(f'[{self.mesh_name}][{self.mac}] Unexpected pair value : {repr(reply)}')
-            self.disconnect()
+            await self.disconnect()
             return False
 
     async def send_packet(self, command, data, dest=None, withResponse=True, attempt=0, uuid=COMMAND_CHAR_UUID):
@@ -300,13 +293,6 @@ class ZenggeMeshLight:
     def _disconnectCallback(self, event):
         logger.info(f'[{self.mesh_name}][{self.mac}] Disconnected by backend...Will reconnect within 30 secs')
         self._disconnect_callback()
-        #self.hass.async_create_task(self._auto_reconnect())
-        #if self.session_key:
-            #logger.info(f'[{self.mesh_name}][{self.mac}] Try to reconnect...')
-            #return asyncio.run_coroutine_threadsafe(self._auto_reconnect(), self.hass.loop).result()
-            #await self._auto_reconnect()
-            #reconnect_thread = threading.Thread(target=self._auto_reconnect, name='Reconnect-' + self.mac)
-            #reconnect_thread.start()
 
     async def _auto_reconnect(self):
         self.session_key = None
@@ -344,10 +330,6 @@ class ZenggeMeshLight:
         assert len(new_mesh_name.encode()) <= 16, "new_mesh_name can hold max 16 bytes"
         assert len(new_mesh_password.encode()) <= 16, "new_mesh_password can hold max 16 bytes"
         assert len(new_mesh_long_term_key.encode()) <= 16, "new_mesh_long_term_key can hold max 16 bytes"
-        if self.session_key is None:
-            print("BLE device is not connected!")
-            self.mac = input('Please enter MAC of device:')
-            self.connect()
         message = pckt.encrypt(self.session_key, new_mesh_name.encode())
         message.insert(0, 0x4)
         await self.client.write_gatt_char(PAIR_CHAR_UUID, message)
@@ -368,7 +350,7 @@ class ZenggeMeshLight:
             print(f'[{self.mesh_name}][{self.mac}] Mesh network settings change failed : {repr(reply)}')
             return False
 
-    def setMeshId(self, mesh_id):
+    async def setMeshId(self, mesh_id):
         """
         Sets the mesh id.
 
@@ -377,7 +359,7 @@ class ZenggeMeshLight:
 
         """
         data = struct.pack("<H", mesh_id)
-        self.send_packet(C_MESH_ADDRESS, data)
+        await self.send_packet(C_MESH_ADDRESS, data)
         self.mesh_id = mesh_id
 
     async def resetMesh(self):
@@ -385,11 +367,6 @@ class ZenggeMeshLight:
         Restores the default name and password. Will disconnect the device.
         """
         return await self.send_packet(C_MESH_RESET, b'\x00')
-
-    # *** No longer needed (Awox code) ***
-    #def readStatus(self):
-    #    packet = self.status_char.read()
-    #    return pckt.decrypt_packet(self.session_key, self.mac, packet)
 
     def _handleNotification(self, cHandle, data):
 
@@ -445,19 +422,17 @@ class ZenggeMeshLight:
                         'brightness': brightness,
                     }
                 logger.info(f'[{self.mesh_name}][{self.mac}] Parsed response - status: {status}\n')
-                if status and self.status_callback:
-                    self.status_callback(status)
-                # *** No longer needed (Awox code) ***
-                #if status: #and status['mesh_id'] == self.mesh_id:
-                #    logger.info(f'[{self.mesh_name}][{self.mac}] Update device status - mesh_id: {status["mesh_id"]}')
-                #    self.state = status['state']
-                #    self.color_mode = status['color_mode']
-                #    self.white_brightness = status['brightness']
-                #    self.white_temperature = status['white_temperature']
-                #    self.color_brightness = status['brightness']
-                #    self.red = status['red']
-                #    self.green = status['green']
-                #    self.blue = status['blue']
+                if status:
+                    if self.status_callback:
+                        self.status_callback(status)
+                    if 'brightness' in status:
+                        self.white_brightness = status['brightness']
+                    if 'white_temperature' in status:
+                        self.white_temperature = status['white_temperature']
+                    if 'color_mode' in status:
+                        self.color_mode = status['color_mode']
+                    if 'state' in status:
+                        self.state = status['state']
             if (device_2_data[0] != 0):
                 mesh_address = device_2_data[0]
                 connected = device_2_data[1]
@@ -489,19 +464,17 @@ class ZenggeMeshLight:
                         'brightness': brightness,
                     }
                 logger.info(f'[{self.mesh_name}][{self.mac}] Parsed response - status: {status}\n')
-                if status and self.status_callback:
-                    self.status_callback(status)
-                # *** No longer needed (Awox code) ***
-                #if status: #and status['mesh_id'] == self.mesh_id:
-                #    logger.info(f'[{self.mesh_name}][{self.mac}] Update device status - mesh_id: {status["mesh_id"]}')
-                #    self.state = status['state']
-                #    self.color_mode = status['color_mode']
-                #    self.white_brightness = status['brightness']
-                #    self.white_temperature = status['white_temperature']
-                #    self.color_brightness = status['brightness']
-                #    self.red = status['red']
-                #    self.green = status['green']
-                #    self.blue = status['blue']
+                if status:
+                    if self.status_callback:
+                        self.status_callback(status)
+                    if 'brightness' in status:
+                        self.white_brightness = status['brightness']
+                    if 'white_temperature' in status:
+                        self.white_temperature = status['white_temperature']
+                    if 'color_mode' in status:
+                        self.color_mode = status['color_mode']
+                    if 'state' in status:
+                        self.state = status['state']
         else:
             print(f'[{self.mesh_name}][{self.mac}] Unknown command [{command}]')
 
@@ -527,22 +500,6 @@ class ZenggeMeshLight:
             brightness: a value between 0xa and 0x64 ...
         """
         return await self.send_packet(OPCODE_SETSTATE, bytes([0xFF,STATEACTION_BRIGHTNESS,brightness,DIMMINGTARGET_AUTO]), dest)
-
-    def setSequenceColorDuration(self, duration, dest=None): ###NOT IMPLEMENTED###
-        """
-        Args :
-            duration: in milliseconds.
-        """
-        data = struct.pack("<I", duration)
-        return False #return self.send_packet(C_SEQUENCE_COLOR_DURATION, data, dest)
-
-    def setSequenceFadeDuration(self, duration, dest=None): ###NOT IMPLEMENTED###
-        """
-        Args:
-            duration: in milliseconds.
-        """
-        data = struct.pack("<I", duration)
-        return False #return self.send_packet(C_SEQUENCE_FADE_DURATION, data, dest)
 
     async def setWhiteBrightness(self, brightness, dest=None):
         """

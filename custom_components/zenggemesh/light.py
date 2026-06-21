@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import logging
-import math
 
 from .zengge_mesh import ZenggeMesh
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-import homeassistant.util.color as color_util
 from homeassistant.helpers.typing import StateType
-from homeassistant.helpers.entity import DeviceInfo, Entity
+from homeassistant.helpers.entity import DeviceInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -27,7 +25,6 @@ from homeassistant.const import (
     CONF_NAME,
     CONF_DEVICES,
     CONF_MAC,
-
     STATE_ON,
     STATE_OFF,
     STATE_UNAVAILABLE,
@@ -43,9 +40,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     mesh = hass.data[DOMAIN][entry.entry_id]
     lights = []
     for device in entry.data[CONF_DEVICES]:
-        # Skip non lights
-        if 'light' not in device['type']:
-            continue
         if CONF_MANUFACTURER not in device:
             device[CONF_MANUFACTURER] = None
         if CONF_MODEL not in device:
@@ -53,11 +47,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if CONF_FIRMWARE not in device:
             device[CONF_FIRMWARE] = None
 
-        type_string = ''
-        supported_color_modes = set()
+        type_string = device.get('type', '')
+        # Skip non lights
+        if 'light' not in type_string:
+            continue
 
-        if 'type' in device:
-            type_string = device['type']
+        supported_color_modes = set()
 
         if 'color' in type_string:
             supported_color_modes.add(ColorMode.RGB)
@@ -86,57 +81,6 @@ def convert_value_to_available_range(value, min_from, max_from, min_to, max_to) 
         max_to,
     )
     return max(new_value, min_to)
-
-
-def normal_round(n):
-    if n - math.floor(n) < 0.5:
-        return math.floor(n)
-    return math.ceil(n)
-
-
-def clamp(value, min_value, max_value):
-    return max(min_value, min(max_value, value))
-
-
-def saturate(value):
-    return clamp(value, 0.0, 1.0)
-
-
-def hue_to_rgb(h):
-    r = abs(h * 6.0 - 3.0) - 1.0
-    g = 2.0 - abs(h * 6.0 - 2.0)
-    b = 2.0 - abs(h * 6.0 - 4.0)
-    return saturate(r), saturate(g), saturate(b)
-
-
-def hsl_to_rgb(h, s=1, l=.5):
-    h = (h/360)
-    r, g, b = hue_to_rgb(h)
-    c = (1.0 - abs(2.0 * l - 1.0)) * s
-    r = round((r - 0.5) * c + l,4) * 255
-    g = round((g - 0.5) * c + l,4) * 255
-    b = round((b - 0.5) * c + l,4) * 255
-    if (r >= 250):
-        r = 255
-    if (g >= 250):
-        g = 255
-    if (b >= 250):
-        b = 255
-    return round(r), round(g), round(b)
-
-
-def h360_to_h255(h360):
-    if h360 <= 180:
-        return normal_round((h360*254)/360)
-    else:
-        return normal_round((h360*255)/360)
-
-
-def h255_to_h360(h255):
-    if h255 <= 128:
-        return normal_round((h255*360)/254)
-    else:
-        return normal_round((h255*360)/255)
 
 
 class ZenggeLight(CoordinatorEntity, LightEntity):
@@ -310,12 +254,13 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
         if 'color_mode' in status:
             supported_color_modes = self.supported_color_modes
             color_mode = ColorMode.ONOFF
-            if status['color_mode']:
+            if status['color_mode'] == 'rgb':
                 color_mode = ColorMode.RGB
-            elif ColorMode.COLOR_TEMP in supported_color_modes:
-                color_mode = self._attr_color_mode = ColorMode.COLOR_TEMP
-            elif ColorMode.BRIGHTNESS in supported_color_modes:
-                color_mode = self._attr_color_mode = ColorMode.BRIGHTNESS
+            elif status['color_mode'] == 'white':
+                if ColorMode.COLOR_TEMP in supported_color_modes:
+                    color_mode = ColorMode.COLOR_TEMP
+                elif ColorMode.BRIGHTNESS in supported_color_modes:
+                    color_mode = ColorMode.BRIGHTNESS
             self._attr_color_mode = color_mode
 
         _LOGGER.info('[%s][%s] mode[%s] Status callback: %s', self.unique_id, self.name, self._attr_color_mode, status)

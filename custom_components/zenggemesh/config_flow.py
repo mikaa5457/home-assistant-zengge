@@ -5,9 +5,6 @@ import logging
 
 import voluptuous as vol
 
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.components import bluetooth
 from homeassistant import config_entries
 from homeassistant.const import (
     CONF_USERNAME,
@@ -27,44 +24,22 @@ from .zengge_connect import ZenggeConnect
 _LOGGER = logging.getLogger(__name__)
 
 
-def create_zengge_connect_object(username, password, country) -> ZenggeConnect:
-    return ZenggeConnect(username, password, country)
-
-
 class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a Zengge config flow."""
 
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
-    config: Optional[Mapping] = {}
-
     def __init__(self):
-        """Initialize the UPnP/IGD config flow."""
-        self._discoveries: Optional[Mapping] = None
         self._mesh_info: Optional[Mapping] = None
 
     async def async_step_user(self, user_input: Optional[Mapping] = None):
-        return await self.async_step_zengge_connect()
-
-        # todo: fix manual connect
-        _LOGGER.debug("async_step_user: user_input: %s", user_input)
+        """Handle the initial user step."""
         if self._mesh_info is None:
-            return await self.async_step_mesh_info()
+            return await self.async_step_zengge_connect()
 
+        _LOGGER.debug("async_step_user: user_input: %s", user_input)
         if user_input is not None and user_input.get('mac'):
-
-            # Ensure wanted device is available
-            test_ok = await DeviceScanner.connect_device(
-                user_input.get('mac'),
-                self._mesh_info.get(CONF_MESH_NAME),
-                self._mesh_info.get(CONF_MESH_PASSWORD),
-                self._mesh_info.get(CONF_MESH_KEY)
-            )
-
-            if not test_ok:
-                return self.async_abort(reason="device_not_found")
-
             await self.async_set_unique_id(
                 self._mesh_info.get(CONF_MESH_NAME), raise_on_progress=False
             )
@@ -76,55 +51,14 @@ class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 self._mesh_info.get(CONF_MESH_KEY)
             )
 
-        # Scan for devices
-        scan_successful = False
-        try:
-            discoveries = await DeviceScanner.async_find_available_devices(
-                self.hass,
-                self._mesh_info.get(CONF_MESH_NAME),
-                self._mesh_info.get(CONF_MESH_PASSWORD)
-            )
-            scan_successful = True
-        except (RuntimeError, pygatt.exceptions.BLEError) as e:
-            _LOGGER.exception("Failed while scanning for devices [%s]", str(e))
-
-        if not scan_successful:
-            return self.async_show_form(
-                step_id="manual",
-                data_schema=vol.Schema({
-                    vol.Required('mac'): str,
-                    vol.Required("name", description={"suggested_value": "Zengge light"}): str,
-                }),
-            )
-
-        # Store discoveries which have not been configured, add name for each discovery.
-        current_devices = {entry.unique_id for entry in self._async_current_entries()}
-        self._discoveries = [
-            {
-                **discovery,
-                'name': discovery['name'],
-            }
-            for discovery in discoveries
-            if discovery['mac'] not in current_devices
-        ]
-
-        # Ensure anything to add.
-        if not self._discoveries:
-            return self.async_abort(reason="no_devices_found")
-
         data_schema = vol.Schema(
             {
-                vol.Required("mac"): vol.In(
-                    {
-                        discovery['mac']: discovery['name']
-                        for discovery in self._discoveries
-                    }
-                ),
+                vol.Required("mac"): str,
                 vol.Required("name", description={"suggested_value": "Zengge light"}): str,
             }
         )
         return self.async_show_form(
-            step_id="select_device",
+            step_id="manual",
             data_schema=data_schema,
         )
 
@@ -147,7 +81,8 @@ class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         if username and password and country:
             try:
-                zengge_connect = await self.hass.async_add_executor_job(create_zengge_connect_object, username, password, country)
+                zengge_connect = ZenggeConnect(username, password, country)
+                await zengge_connect.login()
             except Exception as e:
                 _LOGGER.error('Can not login to Zengge cloud [%s]', e)
                 errors[CONF_PASSWORD] = 'cannot_connect'
@@ -215,7 +150,7 @@ class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if len(devices) == 0:
             return self.async_abort(reason="no_devices_found")
 
-        credentials = zengge_connect.credentials()
+        credentials = await zengge_connect.credentials()
 
         data = {
             CONF_MESH_NAME: credentials['meshKey'],
@@ -269,16 +204,6 @@ class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Forward result of manual input form to step user"""
         return await self.async_step_user(user_input)
 
-    async def async_step_select_device(self, user_input: Optional[Mapping] = None):
-        """Forward result of device select form to step user"""
-        return await self.async_step_user(user_input)
-
-    # @staticmethod
-    # @callback
-    # def async_get_options_flow(config_entry):
-    #     """Define the config flow to handle options."""
-    #     return UpnpOptionsFlowHandler(config_entry)
-
     async def _async_create_entry_from_discovery(
             self,
             mac: str,
@@ -300,33 +225,15 @@ class ZenggeMeshFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_MESH_KEY: mesh_key,
             'devices': [
                 {
+                    'mesh_id': 0,
                     'mac': mac,
                     'name': name,
+                    'model': 'unknown',
+                    'manufacturer': 'Zengge',
+                    'firmware': 'unknown',
+                    'type': 'light|color|temperature|dimming',
                 }
             ]
         }
 
         return self.async_create_entry(title=name, data=data)
-    #
-    # async def _async_get_name_for_discovery(self, discovery: Mapping):
-    #     """Get the name of the device from a discovery."""
-    #     _LOGGER.debug("_async_get_name_for_discovery: discovery: %s", discovery)
-    #     device = await Device.async_create_device(
-    #         self.hass, discovery[DISCOVERY_LOCATION]
-    #     )
-    #     return device.name
-    #
-    #
-
-    # async def _async_get_name_for_discovery(self, discovery: Mapping):
-    #     """Get the name of the device from a discovery."""
-    #     _LOGGER.debug("_async_get_name_for_discovery: discovery: %s", discovery)
-    #     device = await Device.async_create_device(
-    #         self.hass, discovery['name']
-    #     )
-    #     return device.name
-#
-# async def _async_has_devices(hass) -> bool:
-#     """Return if there are devices that can be discovered."""
-#     devices = await DeviceScanner.find_devices()
-#     return len(devices) > 0

@@ -9,7 +9,6 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT
 from homeassistant.components import bluetooth
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-# import zenggemeshlight from .zenggemeshlight
 from .zenggemeshlight import ZenggeMeshLight
 from .const import DOMAIN
 
@@ -50,29 +49,18 @@ class ZenggeMesh(DataUpdateCoordinator):
 
         self._devices = {}
 
-        #self._queue = queue.Queue()
         self._shutdown = False
-        #self._command_tread = threading.Thread(target=self._process_command_queue,
-        #                                       name="ZenggeMeshCommands-" + self._mesh_name)
-        #self._command_tread.daemon = True
-        #self._command_tread.start()
 
         self._startup = False
         async def startup(event):
             _LOGGER.debug('startup')
             self._startup = True
             await self._async_get_devices_rssi()
-            #asyncio.run_coroutine_threadsafe(
-            #    self.async_refresh(), hass.loop
-            #).result()
 
         async def shutdown(event):
             _LOGGER.info('[%s] Shutdown mesh!!', self.mesh_name)
             self._shutdown = True
             await self._disconnect_current_device()
-            #asyncio.run_coroutine_threadsafe(
-            #    self.async_shutdown(), hass.loop
-            #).result()
 
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, startup)
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, shutdown)
@@ -112,33 +100,21 @@ class ZenggeMesh(DataUpdateCoordinator):
     async def _async_update_data(self):
         if self._state['last_rssi_check'] is None: #Run RSSI check if new integration (no restart required)
             _LOGGER.info('zenggemesh async update data - RSSI Check')
-            await self._async_get_devices_rssi()
-            return
+            try:
+                async with async_timeout.timeout(20):
+                    await self._async_get_devices_rssi()
+            except Exception as e:
+                _LOGGER.warning('[%s] Fetching RSSI failed - [%s] %s', self.mesh_name, type(e).__name__, e)
+            return self._state
+
         _LOGGER.info('zenggemesh async update data...')
 
         if not self.is_connected():
             await self._async_connect_device()
 
         if not self.is_connected():
-            return False
-        _LOGGER.info('zenggemesh async update data 2...')
-        #if not self._command_tread.is_alive():
-        #    raise UpdateFailed("Command tread died!")
+            return self._state
 
-        # Reconnect bluetooth every 2 ours to prevent connection freeze
-        #if self._state['last_connection'] is not None \
-        #        and self._state['last_connection'] < dt_util.now() - timedelta(hours=2):
-        #    _LOGGER.info('async_update: Force disconnect to prevent connection freeze')
-        #    async with async_timeout.timeout(10):
-        #        await self._disconnect_current_device()
-        #_LOGGER.info('zenggemesh async update data 3...')
-        if self._state['last_rssi_check'] is None:
-            try:
-                async with async_timeout.timeout(20):
-                    # Scan for devices and get try to determine there RSSI
-                    await self._async_get_devices_rssi()
-            except Exception as e:
-                _LOGGER.warning('[%s] Fetching RSSI failed - [%s] %s', self.mesh_name, type(e).__name__, e)
         _LOGGER.info('zenggemesh async update data 4...')
         try:
             async with async_timeout.timeout(20):
@@ -147,42 +123,26 @@ class ZenggeMesh(DataUpdateCoordinator):
         except Exception as e:
             _LOGGER.info('[%s] Requesting status failed - [%s] %s', self.mesh_name, type(e).__name__, e)
 
-        # Not connected after executing command then we assume we could not connect to a device
         if not self.is_connected():
-            # Disable all when 2nd run is also not successful
             if not self.last_update_success:
                 self.update_status_of_all_devices_to_disabled()
             self.last_update_success = False
-
             raise UpdateFailed('Reconnecting to BLE device' if self.is_reconnecting() else 'No device connected')
 
-        # Give mesh time to gather status updates
         await asyncio.sleep(2)
 
         for mesh_id, device_info in self._devices.items():
-
             _LOGGER.info(f'[{self.mesh_name}][{device_info["name"]}] update count: {device_info["update_count"]}; request count: {device_info["status_request_count"]}; RSSI: {device_info["rssi"]}; last update: {device_info["last_update"]}')
 
-            # Force status update for specific mesh_id when no new update for the last 60 secs
             if device_info['last_update'] is None \
                     or device_info['last_update'] < dt_util.now() - timedelta(seconds=60):
                 _LOGGER.info('[%s][%s][%d] async_update: Device offline for 60+ secs', self.mesh_name, device_info['name'], mesh_id)
 
-                #self._devices[mesh_id]['status_request_count'] += 1
-                #async with async_timeout.timeout(20): #No need to do specific device check due to previous check hitting ALL devices
-                #    await self.async_request_status()
-                #    #await self._async_add_command_to_queue('requestStatus', {'dest': mesh_id, 'withResponse': True}, True)
-
-                # Give mesh time to gather status updates
-                #await asyncio.sleep(.5)
-
-            # Disable devices we didn't get a response the last 90 seconds
             if self._devices[mesh_id]['last_update'] is not None \
                     and self._devices[mesh_id]['last_update'] < dt_util.now() - timedelta(seconds=90):
                 self._devices[mesh_id]['callback']({'state': None})
                 self._devices[mesh_id]['last_update'] = None
                 self._devices[mesh_id]['update_count'] = 0
-                # Device offline then we assume it's also out-of-range (device that's not always powered on for instance)
                 if self._devices[mesh_id]['rssi'] > -9999:
                     self._devices[mesh_id]['rssi'] = -9999
 
@@ -268,91 +228,6 @@ class ZenggeMesh(DataUpdateCoordinator):
         _LOGGER.info('[%s] ****ASYNC REFRESH****', self.mesh_name)
         await self._async_get_devices_rssi()
 
-    async def _async_add_command_to_queue(self, command: str, params, allow_to_fail: bool = False):
-        _LOGGER.info('[%s] Queue command %s %s', self.mesh_name, command, params)
-
-        if not self._command_tread.is_alive():
-            raise UpdateFailed("Command tread died!")
-
-        done = False
-
-        def command_executed():
-            nonlocal done
-            done = True
-
-        self._queue.put({
-            'command': command,
-            'params': params,
-            'callback': command_executed,
-            'allow_to_fail': allow_to_fail
-        })
-        while not done:
-            await asyncio.sleep(.01)
-
-    def _process_command_queue(self):
-        while not self._shutdown:
-
-            _LOGGER.debug('[%s] get item from queue', self.mesh_name)
-            command = self._queue.get()
-            _LOGGER.debug('[%s] process 0/%d - %s', self.mesh_name, self._queue.qsize(), command)
-            try:
-                tries = 0
-                while not self._call_command(command) and tries < 3:
-                    tries = tries + 1
-                    _LOGGER.warning('[%s] Command failed, retry %s', self.mesh_name, tries)
-
-            except Exception as e:
-                _LOGGER.error('[%s] Command failed and skipped - [%s] %s', self.mesh_name, type(e).__name__, e)
-                asyncio.run_coroutine_threadsafe(
-                    self._disconnect_current_device(), self.hass.loop
-                ).result()
-
-            if 'callback' in command:
-                command['callback']()
-
-            self._queue.task_done()
-
-    def _call_command(self, command) -> bool:
-        self._connect_device()
-        if not self.is_connected():
-            return False
-
-        failed = False
-        try:
-            # Call command
-            if isinstance(command['params'], tuple):
-                result = getattr(self._connected_bluetooth_device, command['command'])(*command['params'])
-            else:
-                result = getattr(self._connected_bluetooth_device, command['command'])(**command['params'])
-            _LOGGER.debug(f'[{self.mesh_name}] Send command {command["command"]} got result {result}')
-        except Exception as e:
-            _LOGGER.exception('[%s] Command failed, re-connecting for new attempt - [%s] %s', self.mesh_name, type(e).__name__, e)
-            result = None
-            failed = True
-
-        _LOGGER.debug('[%s] Command result: %s', self.mesh_name, result)
-
-        # We always expect result else we assume command wasn't successful
-        if result is None and not command['allow_to_fail'] and not failed:
-            _LOGGER.warning('[%s] Timeout executing command, probably Bluetooth connection is lost/frozen, re-connecting', self.mesh_name)
-            failed = True
-
-        if failed:
-            asyncio.run_coroutine_threadsafe(
-                self._disconnect_current_device(), self.hass.loop
-            ).result()
-
-        # Only report failure for commands that we do not allow to fail (status updates are for example commands we allow to fail)
-        if failed and not command['allow_to_fail']:
-            return False
-
-        return True
-
-    def _connect_device(self):
-        asyncio.run_coroutine_threadsafe(
-            self._async_connect_device(), self.hass.loop
-        ).result()
-
     async def _async_connect_device(self):
         _LOGGER.info('zenggemesh async connect device...')
         while self.is_reconnecting():
@@ -365,11 +240,10 @@ class ZenggeMesh(DataUpdateCoordinator):
             while self.is_reconnecting():
                 await asyncio.sleep(.1)
             if self.is_connected():
-                self._connected_bluetooth_device = device
                 self._state['connected_device'] = device_info['name']
                 self._state['last_connection'] = dt_util.now()
                 await self._async_update_mesh_state()
-                _LOGGER.info("[%s][%s][%s] Connected", self.mesh_name, device_info['name'], device_info['mac'])
+                _LOGGER.info("[%s][%s][%s] Already connected", self.mesh_name, device_info['name'], device_info['mac'])
                 break
             if device_info['mac'] is None:
                 continue
@@ -402,7 +276,7 @@ class ZenggeMesh(DataUpdateCoordinator):
         else:
             # Force new RSSI check no device we could connect to
             self._state['last_rssi_check'] = None
-            _LOGGER.info("[%s][%s][%s] Last RSSI Check set to None", self.mesh_name, device_info['name'], device_info['mac'])
+            _LOGGER.info("[%s] Last RSSI Check set to None (no device to connect to)", self.mesh_name)
             await self._async_update_mesh_state()
 
     def _getConnectableDevices(self):
