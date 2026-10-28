@@ -266,6 +266,10 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
 
         _LOGGER.info('[%s][%s] mode[%s] Status callback: %s', self.unique_id, self.name, self._attr_color_mode, status)
 
+        # Mesh can report status before the entity is added to HA; state is written on add
+        if self.hass is None or self.entity_id is None:
+            return
+
         self.async_write_ha_state()
 
     @callback
