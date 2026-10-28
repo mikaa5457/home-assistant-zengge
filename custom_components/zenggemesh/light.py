@@ -60,7 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         if 'temperature' in type_string:
             supported_color_modes.add(ColorMode.COLOR_TEMP)
 
-        if 'dimming' in type_string:
+        # BRIGHTNESS is only valid on its own; RGB and COLOR_TEMP already imply dimming
+        if 'dimming' in type_string and len(supported_color_modes) == 0:
             supported_color_modes.add(ColorMode.BRIGHTNESS)
 
         if len(supported_color_modes) == 0:
@@ -262,6 +263,8 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
                     color_mode = ColorMode.COLOR_TEMP
                 elif ColorMode.BRIGHTNESS in supported_color_modes:
                     color_mode = ColorMode.BRIGHTNESS
+            if color_mode not in supported_color_modes:
+                color_mode = next(iter(supported_color_modes))
             self._attr_color_mode = color_mode
 
         _LOGGER.info('[%s][%s] mode[%s] Status callback: %s', self.unique_id, self.name, self._attr_color_mode, status)
