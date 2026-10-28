@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
-    ATTR_COLOR_TEMP,
+    ATTR_COLOR_TEMP_KELVIN,
     ATTR_RGB_COLOR,
     LightEntity,
     ColorMode
@@ -156,11 +156,13 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
         )
 
     @property
-    def color_temp(self):
-        """Return the color temperature in mired."""
+    def color_temp_kelvin(self):
+        """Return the color temperature in Kelvin."""
         if self._white_temperature is None:
             return None
-        return convert_value_to_available_range(self._white_temperature, 0, 0x64, self.min_mireds, self.max_mireds)
+        # Device scale: 0 = coldest, 0x64 = warmest
+        return convert_value_to_available_range(0x64 - self._white_temperature, 0, 0x64,
+                                                self.min_color_temp_kelvin, self.max_color_temp_kelvin)
 
     @property
     def brightness(self):
@@ -176,14 +178,12 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
         return self._color_brightness
 
     @property
-    def min_mireds(self):
-        # 6500 Kelvin
-        return 153
+    def min_color_temp_kelvin(self):
+        return 2700
 
     @property
-    def max_mireds(self):
-        # 2700 Kelvin
-        return 370
+    def max_color_temp_kelvin(self):
+        return 6500
 
     @property
     def is_on(self):
@@ -215,8 +215,9 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
                 await self._mesh.async_set_color_brightness(self._mesh_id, device_brightness)
                 status['color_brightness'] = device_brightness
 
-        if ATTR_COLOR_TEMP in kwargs:
-            device_white_temp = convert_value_to_available_range(kwargs[ATTR_COLOR_TEMP], self.min_mireds, self.max_mireds, 0, 0x64)
+        if ATTR_COLOR_TEMP_KELVIN in kwargs:
+            device_white_temp = 0x64 - convert_value_to_available_range(kwargs[ATTR_COLOR_TEMP_KELVIN], self.min_color_temp_kelvin,
+                                                                        self.max_color_temp_kelvin, 0, 0x64)
             await self._mesh.async_set_white_temperature(self._mesh_id, device_white_temp)
             status['state'] = True
             status['white_temperature'] = device_white_temp
@@ -241,7 +242,7 @@ class ZenggeLight(CoordinatorEntity, LightEntity):
         if 'white_brightness' in status:
             self._white_brightness = convert_value_to_available_range(status['white_brightness'], 0, 100, 0, 255)
         if 'white_temperature' in status:
-            self._white_temperature = convert_value_to_available_range(status['white_temperature'], 0, 0x64, self.min_mireds, self.max_mireds)
+            self._white_temperature = status['white_temperature']
         if 'color_brightness' in status:
             self._color_brightness = convert_value_to_available_range(status['color_brightness'], 0, 100, 0, 255)
         if 'red' in status:
